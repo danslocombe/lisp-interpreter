@@ -1,6 +1,13 @@
 {-# LANGUAGE DeriveFunctor #-}
+{-# LANGUAGE FlexibleInstances #-}
 
 module Main where
+
+import Text.Parsec
+import Text.Parsec.Char
+import Data.List (intersperse)
+import Data.Either (isRight)
+-- import Text.Parsec.Token
 
 newtype Fix f = Fx (f (Fix f))
 unFix :: Fix f -> f (Fix f)
@@ -13,6 +20,9 @@ cata :: Functor f => Algebra f a -> (Fix f -> a)
 cata alg = alg . fmap (cata alg) . unFix
 
 newtype Variable = Variable String deriving (Show, Eq)
+
+-- instance Show Variable where
+  -- show (Variable v) = v
 
 data LispObj 
   = Nil
@@ -38,6 +48,7 @@ instance Show Proc where
 
 data PrimFunc
   = PFPlus
+  | PFMinus
   | PFCons
   | PFCar
   | PFCdr
@@ -50,30 +61,42 @@ data PrimFunc
   | PFError
   deriving (Show, Eq)
 
+primFuncSymbols :: [(String, PrimFunc)] 
+primFuncSymbols =
+  [ ("+", PFPlus)
+  , ("-", PFMinus)
+  , ("cons", PFCons)
+  , ("car", PFCar)
+  , ("cdr", PFCdr)
+  ]
+
 data Env = Env [(Variable, LispObj)]
 
 data ExprF a 
   = Obj LispObj
   | Var Variable
-  -- | Quoted a
   | Assign Variable a a
   | Def Variable [Variable] a a
   | If a a a
   | Lambda [Variable] a
-  -- | Begin a
   -- | Cond a
   | App a [a]
   deriving (Show, Functor)
 
 showExprF :: Algebra ExprF String
 showExprF e = case e of
-  Var (Variable s) -> show s
+  Var v -> show v
   Obj p -> show p
   If _ _ _ -> "If expression"
+  Def v [] val next -> show v ++ " = " ++ show val ++ " in " ++ next
+  App x args -> "( " ++ show x ++ concat (intersperse " " (map show args)) ++ ")"
   _ -> "OTHER"
 
 showExpr :: Expr -> String
 showExpr = cata showExprF
+
+instance Show Expr where
+  show = showExpr
 
 newtype LispError = LispError String 
   deriving Show
@@ -131,5 +154,89 @@ lookupVar :: Env -> Variable -> Ret LispObj
 lookupVar (Env u) v
   = maybe (Left (LispError $ "Variable not defined " ++ show v)) Right (lookup v u)
 
+testSource :: String
+testSource = "(define x 2)\n(+ x 2)"
+
+parseInt :: Parsec String st Expr
+parseInt = Fx . Obj . PrimInt . read <$> (many1 $ oneOf "0123456789")
+
+parseVar :: Parsec String st Variable
+parseVar = Variable <$> many1 letter
+
+whitespace :: Parsec String st ()
+whitespace
+  =   spaces 
+  <|> ((string "\r\n") >> return ())
+  <|> ((string "\n") >> return ())
+
+parseOverall :: Parsec String st Expr
+parseOverall
+  =   try (do {x <- parseBracket parseDefine; x <$> parseOverall})
+  <|> try parseExpr
+
+parseExpr :: Parsec String st Expr
+parseExpr
+  =   do
+  spaces
+  try (parseBracket parseApply) 
+    <|> try (Fx . Var <$> parseVar)
+    <|> try parseInt
+    <|> try (Fx . Obj . ProcObj <$> parsePrimProc)
+
+parseBracket :: Parsec String st a -> Parsec String st a
+parseBracket p = do
+  try whitespace
+  string "("
+  spaces
+  x <- p
+  spaces
+  string ")"
+  try whitespace
+  return x
+
+parseApply :: Parsec String st Expr
+parseApply = do
+  proc <- parseExpr
+  args <- many1 parseExpr
+  return $ Fx $ App proc args
+
+parsePrimProc :: Parsec String st Proc
+parsePrimProc = do
+  string "+"
+  return (ProcPrim PFPlus)
+
+parsePrimFunc :: String -> Either ParseError PrimFunc
+parsePrimFunc s = maybe err Right (lookup s primFuncSymbols)
+  where err = undefined
+
+parseDefine :: Parsec String st (Expr -> Expr)
+parseDefine = do
+  string "define"
+  spaces
+  parseDefineVar <|> parseDefineProc
+
+parseDefineVar :: Parsec String st (Expr -> Expr)
+parseDefineVar = do
+  v <- parseVar
+  spaces
+  i <- parseInt
+  return $ \next -> Fx $ Def v [] i next
+
+parseDefineProc :: Parsec String st (Expr -> Expr)
+parseDefineProc = do
+  (name:params) <- parseBracket (many1 parseVar)
+  spaces
+  body <- parseExpr
+  return $ \next -> Fx $ Def name params body next
+
+dothing :: String -> IO ()
+dothing s = 
+  let x = runParser parseOverall "" "" s
+  in case x of
+    Right parse -> case eval emptyEnv parse of
+      Right ran -> putStrLn $ show ran
+      Left err -> putStrLn $ "Runtime error: " ++ show err
+    Left err -> putStrLn $ show err
+    
 main :: IO ()
 main = putStrLn "yo"
