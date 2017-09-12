@@ -75,14 +75,11 @@ showExprF e = case e of
 showExpr :: Expr -> String
 showExpr = cata showExprF
 
-newtype TypeError = TypeError String 
+newtype LispError = LispError String 
   deriving Show
 
-type Ret a = Either TypeError a
+type Ret a = Either LispError a
 
--- test = Fx $ Def (Fx $ Variable "x") (Fx $ Obj (PrimInt 2))
-        -- (Fx $ App (Fx $ LispObj (ProcPrim PFPlus)) (Fx $ Var (Variable "x")) (Fx $ Obj (PrimInt 1)))
-        --
 test :: Expr
 test = Fx $ Def (Variable "x") [] (Fx $ Obj (PrimInt 2))
       (Fx $ App (Fx $ Obj $ ProcObj $ ProcPrim PFPlus) [Fx $ Var (Variable "x"), Fx $ Obj (PrimInt 1)])
@@ -100,44 +97,39 @@ testTrivial = (Fx $ Obj $ PrimInt 2)
 emptyEnv :: Env
 emptyEnv = Env []
 
-eval :: Env -> Expr -> Ret Expr
+eval :: Env -> Expr -> Ret LispObj
 eval env (Fx expr) = case expr of
-  (Obj o)                              -> Right . Fx . Obj $ o
+  (Obj o)                              -> Right o
   (Def var [] val next)                -> evalAssignment env var val >>= \x -> eval x next
-  (App (Fx (Obj (ProcObj proc))) args) -> apply proc $ map (\(Fx (Obj o)) -> o) args
-  (Var v)                              -> Fx . Obj <$> lookupVar env v
-  x -> Left $ TypeError $ "Error " ++ (showExpr $ Fx x)
-
--- evalSequence :: Env -> [Expr] -> Ret (Env, Expr)
--- evalSequence env exps = foldM (eval) 
+  (App (Fx (Obj (ProcObj proc))) args) -> mapM (eval env) args >>= \xs -> apply proc xs
+  (Var v)                              -> lookupVar env v
+  x -> Left $ LispError $ "Error " ++ (showExpr $ Fx x)
 
 evalAssignment :: Env -> Variable -> Expr -> Ret Env
-evalAssignment env@(Env u) v e =
-  eval env e >>= (\x -> case x of
-    Fx (Obj p) -> Right $ Env $ (v,p):u
-    y            -> Left $ TypeError $ "Could not assign " ++ show v ++ " non-obj value"
-  )
+evalAssignment env@(Env u) v e = do
+  x <- eval env e
+  return $ Env $ (v,x):u
 
-apply :: Proc -> [LispObj] -> Ret Expr
-apply (ProcPrim prim) ps = Fx . Obj <$> applyPrim prim ps
+apply :: Proc -> [LispObj] -> Ret LispObj
+apply (ProcPrim prim) ps = applyPrim prim ps
 apply _ _ = undefined
 
 applyPrim :: PrimFunc -> [LispObj] -> Ret LispObj
 applyPrim PFPlus [(PrimInt n), (PrimInt m)]
   = Right $ PrimInt (n + m)
 applyPrim PFPlus _
-  = Left $ TypeError $ "(+) expects two ints"
+  = Left $ LispError $ "(+) expects two ints"
 
-evalIf :: Env -> Expr -> Expr -> Expr -> Ret Expr
-evalIf env cond true false = 
-  eval env cond >>= (\x -> case x of
-    Fx (Obj (PrimBool b)) -> eval env (if b then true else false)
-    y          -> Left $ TypeError $ "Expected bool, got: " ++ showExpr (y)
-  )
+evalIf :: Env -> Expr -> Expr -> Expr -> Ret LispObj
+evalIf env cond true false = do
+  x <- eval env cond
+  case x of
+    PrimBool b -> eval env (if b then true else false)
+    y          -> Left $ LispError $ "Expected bool, got: " ++ show y
 
 lookupVar :: Env -> Variable -> Ret LispObj
 lookupVar (Env u) v
-  = maybe (Left (TypeError $ "Variable not defined " ++ show v)) Right (lookup v u)
+  = maybe (Left (LispError $ "Variable not defined " ++ show v)) Right (lookup v u)
 
 main :: IO ()
 main = putStrLn "yo"
