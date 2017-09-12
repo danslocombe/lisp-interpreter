@@ -21,9 +21,6 @@ cata alg = alg . fmap (cata alg) . unFix
 
 newtype Variable = Variable String deriving (Show, Eq)
 
--- instance Show Variable where
-  -- show (Variable v) = v
-
 data LispObj 
   = Nil
   | Cons LispObj LispObj
@@ -40,11 +37,11 @@ data Symbol
 
 data Proc
   = ProcPrim PrimFunc
-  | Compound [Variable] Expr Env
+  | ProcLisp [Variable] Expr Env
 
 instance Show Proc where
   show (ProcPrim p) = show p
-  show (Compound _ _ _) = "Procedure"
+  show (ProcLisp args _ _) = "(" ++ concat (intersperse " " (map show args)) ++ ")"
 
 data PrimFunc
   = PFPlus
@@ -90,7 +87,7 @@ showExprF e = case e of
   If _ _ _ -> "If expression"
   Def v [] val next -> show v ++ " = " ++ show val ++ " in " ++ next
   App x args -> "( " ++ show x ++ concat (intersperse " " (map show args)) ++ ")"
-  _ -> "OTHER"
+  _ -> "OTHER EXPR"
 
 showExpr :: Expr -> String
 showExpr = cata showExprF
@@ -124,18 +121,34 @@ eval :: Env -> Expr -> Ret LispObj
 eval env (Fx expr) = case expr of
   (Obj o)                              -> Right o
   (Def var [] val next)                -> evalAssignment env var val >>= \x -> eval x next
-  (App (Fx (Obj (ProcObj proc))) args) -> mapM (eval env) args >>= \xs -> apply proc xs
+  (Def var args body next)             -> evalAssignmentFunc env var args body >>= \x -> eval x next
+  (App func args) -> do
+     f <- eval env func 
+     args <- mapM (eval env) args 
+     case f of
+       ProcObj proc -> apply proc args
+       _ -> Left $ LispError $ 
+            "Error tried to apply " ++ show f ++
+            " which is not a function"
   (Var v)                              -> lookupVar env v
-  x -> Left $ LispError $ "Error " ++ (showExpr $ Fx x)
+  x                                    -> Left $ LispError $ "Error " ++ (showExpr $ Fx x)
 
 evalAssignment :: Env -> Variable -> Expr -> Ret Env
 evalAssignment env@(Env u) v e = do
   x <- eval env e
   return $ Env $ (v,x):u
 
+evalAssignmentFunc :: Env -> Variable -> [Variable] -> Expr -> Ret Env
+evalAssignmentFunc env@(Env u) name args body = do
+  let proc = ProcLisp args body env
+  return $ Env $ (name, ProcObj proc):u
+  
+
 apply :: Proc -> [LispObj] -> Ret LispObj
 apply (ProcPrim prim) ps = applyPrim prim ps
-apply _ _ = undefined
+apply (ProcLisp args body (Env env)) ps
+  = let env' =  Env $ (zip args ps) ++ env
+    in eval env' body
 
 applyPrim :: PrimFunc -> [LispObj] -> Ret LispObj
 applyPrim PFPlus [(PrimInt n), (PrimInt m)]
@@ -224,7 +237,8 @@ parseDefineVar = do
 
 parseDefineProc :: Parsec String st (Expr -> Expr)
 parseDefineProc = do
-  (name:params) <- parseBracket (many1 parseVar)
+  let p = do {spaces; x<-parseVar; spaces; return x}
+  (name:params) <- parseBracket (many p)
   spaces
   body <- parseExpr
   return $ \next -> Fx $ Def name params body next
