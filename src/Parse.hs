@@ -5,49 +5,60 @@ import Types
 import Text.Parsec
 import Text.Parsec.Char
 
+-- Mapping of basic, primative functions to their respective AST elem
 primFuncSymbols :: [(String, PrimFunc)] 
 primFuncSymbols =
   [ ("+", PFPlus)
   , ("-", PFMinus)
+  , ("<", PFLess)
+  , (">", PFGreater)
+  , ("=", PFEq)
   , ("cons", PFCons)
   , ("car", PFCar)
   , ("cdr", PFCdr)
+  , ("list", PFList)
+  , ("null?", PFNullCheck)
   ]
 
-
-parseInt :: Parsec String st Expr
-parseInt = Fx . Obj . PrimInt . read <$> (many1 $ oneOf "0123456789")
-
-parseVar :: Parsec String st Variable
-parseVar = Variable <$> many1 letter
-
-whitespace :: Parsec String st ()
-whitespace
-  =   spaces 
-  <|> ((string "\r\n") >> return ())
-  <|> ((string "\n") >> return ())
-
-parseOverall :: Parsec String st Expr
-parseOverall
-  =   try (do {x <- parseBracket parseDefine; x <$> parseOverall})
+parseLisp :: Parsec String st Expr
+parseLisp
+  =   try (do {x <- parseBracket parseDefine; x <$> parseLisp})
   <|> try parseExpr
 
 parseExpr :: Parsec String st Expr
-parseExpr
-  =   do
+parseExpr = do
   spaces
-  try (parseBracket parseApply) 
-    <|> try (Fx . Var <$> parseVar)
-    <|> try parseInt
-    <|> try (Fx . Obj . ProcObj <$> parsePrimProc)
+  try parseNil
+  <|> try (parseBracket parseIf) 
+  <|> try (parseBracket parseApply) 
+  <|> try (Fx . Obj . ProcObj <$> parsePrimProc)
+  <|> try parseInt
+  <|> try (Fx . Var <$> parseVar)
 
+parseNil :: Parsec String st Expr
+parseNil = string "nil" >> (return $ Fx $ Obj $ Nil)
+
+parseIf = do
+  string "if"
+  spaces
+  predicate <- parseExpr
+  spaces
+  string "then"
+  spaces
+  thenExpr <- parseExpr
+  spaces
+  string "else"
+  spaces
+  elseExpr <- parseExpr
+  return $ Fx $ If predicate thenExpr elseExpr
+  
 parseBracket :: Parsec String st a -> Parsec String st a
 parseBracket p = do
   try whitespace
   string "("
-  spaces
+  try spaces
   x <- p
-  spaces
+  try spaces
   string ")"
   try whitespace
   return x
@@ -55,13 +66,17 @@ parseBracket p = do
 parseApply :: Parsec String st Expr
 parseApply = do
   proc <- parseExpr
-  args <- many1 parseExpr
+  spaces
+  args <- sepEndBy parseExpr spaces
   return $ Fx $ App proc args
 
 parsePrimProc :: Parsec String st Proc
-parsePrimProc = do
-  string "+"
-  return (ProcPrim PFPlus)
+parsePrimProc = 
+  let tryParsePrim = map (\(symbol, prim) -> try ( do {
+        string symbol; 
+        return (ProcPrim prim)}))
+          primFuncSymbols
+  in foldl1 ((<|>)) tryParsePrim
 
 parsePrimFunc :: String -> Either ParseError PrimFunc
 parsePrimFunc s = maybe err Right (lookup s primFuncSymbols)
@@ -87,3 +102,15 @@ parseDefineProc = do
   spaces
   body <- parseExpr
   return $ \next -> Fx $ Def name params body next
+
+parseInt :: Parsec String st Expr
+parseInt = Fx . Obj . PrimInt . read <$> (many1 digit)
+
+parseVar :: Parsec String st Variable
+parseVar = Variable <$> many1 (try letter <|> try (oneOf "-?!"))
+
+whitespace :: Parsec String st ()
+whitespace
+  =   spaces 
+  <|> ((string "\r\n") >> return ())
+  <|> ((string "\n") >> return ())

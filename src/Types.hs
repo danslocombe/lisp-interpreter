@@ -42,6 +42,9 @@ instance Show Proc where
 data PrimFunc
   = PFPlus
   | PFMinus
+  | PFLess
+  | PFGreater
+  | PFEq
   | PFCons
   | PFCar
   | PFCdr
@@ -50,7 +53,7 @@ data PrimFunc
   | PFPairCheck
   | PFNullCheck
   | PFSet
-  | PFEq
+  -- | PFEq
   | PFError
   deriving (Show, Eq)
 
@@ -81,4 +84,3 @@ showExprF e = case e of
 
 showExpr :: Expr -> String
 showExpr = cata showExprF
-
