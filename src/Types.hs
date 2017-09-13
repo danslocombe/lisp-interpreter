@@ -99,3 +99,10 @@ showLispF e = case e of
 
 showLisp :: Lisp -> String
 showLisp = cata showLispF
+
+data ReplEnv a = ReplEnv Env a deriving (Show, Functor)
+
+type Ret a = Either LispError a
+
+newtype LispError = LispError String 
+  deriving Show
