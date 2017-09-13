@@ -2,18 +2,18 @@ name:                lisp
 version:             0.1.0.0
 -- synopsis:
 -- description:
-homepage:            https://github.com/githubuser/lisp#readme
+homepage:            https://github.com/danslocombe/lisp-interpreter#readme
 license:             BSD3
 license-file:        LICENSE
-author:              Author name here
-maintainer:          example@example.com
-copyright:           2017 Author name here
+author:              Daniel Slocombe
+maintainer:          ds4314@ic.ac.uk
+copyright:           2017 Daniel Slocombe
 category:            Web
 build-type:          Simple
 cabal-version:       >=1.10
 extra-source-files:  README.md
 
-executable haskebase64
+executable lisp
   hs-source-dirs:      src
   main-is:             Main.hs
   default-language:    Haskell2010

@@ -20,8 +20,7 @@ concatEnvs (Env e) (Env e') = Env $ e ++ e'
 -- Eval for repl
 lispRepl :: Env -> String -> Ret (ReplEnv (Maybe LispObj))
 lispRepl env s = 
-  let x = runParser parseLispRepl "" "" s
-  in case x of
+  case runParser parseLispRepl "" "" s of
     Left err -> Left $ LispError $ show err
     Right (LRDef def) -> do
                  { d <- evalDefinition env def
