@@ -53,19 +53,21 @@ data PrimFunc
 -- An environment is a list of mappings from variable to object
 -- Lookup is done by returning the first item in the list, so
 -- inner scoped variables override outer scoped ones
-data Env = Env [(Variable, LispObj)]
+data Env = Env [(Variable, LispObj)] deriving (Show)
 
 -- The lisp AST
 data LispF a 
   = Obj LispObj
   | Var Variable
   | Assign Variable a a
-  | Def Variable [Variable] a a
+  | Def Definition a
   | If a a a
   | Lambda [Variable] a
   | Cond [(a,a)]
   | App a [a]
   deriving (Show, Functor)
+
+data Definition = Definition Variable [Variable] Lisp deriving (Show)
 
 -- Represents the fix point of a data type
 newtype Fix f = Fx (f (Fix f))
@@ -81,6 +83,8 @@ cata alg = alg . fmap (cata alg) . unFix
 
 type Lisp = Fix LispF
 
+data LispRepl = LRDef Definition | LRObj Lisp deriving Show
+
 instance Show Lisp where
   show = showLisp
 
@@ -89,7 +93,7 @@ showLispF e = case e of
   Var v -> show v
   Obj p -> show p
   If _ _ _ -> "If expression"
-  Def v [] val next -> show v ++ " = " ++ show val ++ " in " ++ next
+  Def (Definition v [] val) next -> show v ++ " = " ++ show val ++ " in " ++ next
   App x args -> "( " ++ show x ++ concat (intersperse " " (map show args)) ++ ")"
   _ -> "OTHER EXPR"
 

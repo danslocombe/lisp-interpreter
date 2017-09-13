@@ -20,9 +20,20 @@ primFuncSymbols =
   , ("null?", PFNullCheck)
   ]
 
+parseLispRepl :: Parsec String st (LispRepl)
+parseLispRepl = try (do 
+                    { d <- parseBracket parseDefine
+                    ; eof
+                    ; return $ LRDef d
+                    })
+            <|> try (LRObj <$> parseLisp) 
+
 parseLisp :: Parsec String st Lisp
 parseLisp
-  =   try (do {x <- parseBracket parseDefine; x <$> parseLisp})
+  =   try (do 
+          { x <- parseBracket parseDefine
+          ; next <- parseLisp
+          ; return $ Fx $ Def x next})
   <|> try parseExpr
 
 parseExpr :: Parsec String st Lisp
@@ -82,26 +93,26 @@ parsePrimFunc :: String -> Either ParseError PrimFunc
 parsePrimFunc s = maybe err Right (lookup s primFuncSymbols)
   where err = undefined
 
-parseDefine :: Parsec String st (Lisp -> Lisp)
+parseDefine :: Parsec String st Definition
 parseDefine = do
   string "define"
   spaces
   parseDefineVar <|> parseDefineProc
 
-parseDefineVar :: Parsec String st (Lisp -> Lisp)
+parseDefineVar :: Parsec String st Definition
 parseDefineVar = do
   v <- parseVar
   spaces
-  i <- parseInt
-  return $ \next -> Fx $ Def v [] i next
+  i <- parseExpr
+  return $ Definition v [] i
 
-parseDefineProc :: Parsec String st (Lisp -> Lisp)
+parseDefineProc :: Parsec String st Definition
 parseDefineProc = do
   let p = do {spaces; x<-parseVar; spaces; return x}
   (name:params) <- parseBracket (many p)
   spaces
   body <- parseExpr
-  return $ \next -> Fx $ Def name params body next
+  return $ Definition name params body
 
 parseInt :: Parsec String st Lisp
 parseInt = Fx . Obj . PrimInt . read <$> (many1 digit)

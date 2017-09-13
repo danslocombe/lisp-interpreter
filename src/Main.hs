@@ -1,3 +1,5 @@
+{-# LANGUAGE DeriveFunctor #-}
+
 module Main where
 
 import Types
@@ -6,15 +8,36 @@ import Parse
 import Text.Parsec
 import Text.Parsec.Char
 import Data.Either (isRight)
-import Control.Monad (forever)
+import Control.Monad (forever, foldM)
 
 newtype LispError = LispError String 
   deriving Show
 
+data ReplEnv a = ReplEnv Env a deriving (Show, Functor)
+
+emptyEnv :: Env
+emptyEnv = Env []
+
+concatEnvs :: Env -> Env -> Env
+concatEnvs (Env e) (Env e') = Env $ e ++ e'
+
 type Ret a = Either LispError a
 
-lisp :: String -> IO ()
-lisp s =
+lispRepl :: Env -> String -> Ret (ReplEnv (Maybe LispObj))
+lispRepl env s = 
+  let x = runParser parseLispRepl "" "" s
+  in case x of
+    Left err -> Left $ LispError $ show err
+    Right parse -> case parse of
+      LRDef def -> do
+                   { d <- evalDefinition env def
+                   ; return $ ReplEnv d Nothing }
+      LRObj lisp -> do
+                    { x <- eval env lisp
+                    ; return $ ReplEnv env (Just x) }
+
+lispIO :: String -> IO ()
+lispIO s =
   let x = runParser parseLisp "" "" s
   in putStrLn $ case x of
     Left err -> "Parsing error: " ++ show err
@@ -22,26 +45,48 @@ lisp s =
       Left err -> "Runtime error: " ++ show err
       Right ran -> show ran
     
--- Repl with lisp
-main :: IO ()
-main = forever (getLine >>= lisp) 
+-- main :: IO ()
+-- main = forever (getLine >>= lispIO) 
 
-emptyEnv :: Env
-emptyEnv = Env []
+allWhitespace :: String -> Bool
+allWhitespace s = all (\x -> (elem x " \r\n\t")) s
+
+loadPrelude :: IO Env
+loadPrelude = fromRight $ foldM f emptyEnv prelude
+  where 
+    f env source = extractEnv <$> (lispRepl env source)
+    extractEnv (ReplEnv env _) = env
+    fromRight x = case x of
+      Right y -> putStrLn ("Loaded " ++ (show $ length prelude) ++ " functions")  >> return y
+      Left z -> (putStrLn $ show z) >> return emptyEnv
+
+main :: IO ()
+-- main = f emptyEnv prelude
+main = do
+  putStrLn "Loading Prelude.."
+  env <- loadPrelude
+  f env ""
+  where
+    f env s = do 
+      if allWhitespace s
+      then do
+        s' <- getLine
+        f env s'
+      else do
+        env' <- case lispRepl env s of
+          Left err -> putStrLn (show err) >> return env
+          Right (ReplEnv e Nothing) -> putStrLn "Ok" >> return e
+          Right (ReplEnv e2 (Just x)) -> putStrLn (show x) >> return e2
+        s'' <- getLine
+        f env' s''
 
 eval :: Env -> Lisp -> Ret LispObj
 eval env (Fx expr) = case expr of
 
   (Obj o) -> Right o
 
-  -- Definition of a value (has no parameters)
-  (Def var [] val next) -> do
-    x <- evalAssignment env var val
-    eval x next 
-
-  -- Definition of a function (has parameters)
-  (Def var args body next) -> do
-    x <- evalAssignmentFunc env var args body
+  (Def d next) -> do
+    x <- evalDefinition env d
     eval x next
 
   -- Application of a function
@@ -65,6 +110,12 @@ eval env (Fx expr) = case expr of
   x -> Left $ LispError $ "Error " ++ (showLisp $ Fx x)
 
 
+evalDefinition :: Env -> Definition -> Ret Env
+  -- Definition of a value (has no parameters)
+evalDefinition env (Definition var [] val) = evalAssignment env var val
+  -- Definition of a function (has parameters)
+evalDefinition env (Definition var args body) = evalAssignmentFunc env var args body
+
 -- Evaluate declaration of value, updates environment
 evalAssignment :: Env -> Variable -> Lisp -> Ret Env
 evalAssignment env@(Env u) v e = do
@@ -82,6 +133,7 @@ evalAssignmentFunc env@(Env u) name args body = do
 -- Evaluate application of a list of arguments to a function
 apply :: Proc -> [LispObj] -> Ret LispObj
 apply (ProcPrim prim) ps = applyPrim prim ps
+  -- TODO make sure size of args = size ps
 apply (ProcLisp args body (Env env)) ps
   = let env' =  Env ((zip args ps) ++ env)
     in eval env' body
@@ -162,7 +214,35 @@ lispSourceMap
                  "(map f (cdr xs))" ++ "\n" ++
         ")"                         ++ "\n" ++
       ")"                           ++ "\n" ++
-    ")"
+    ")"                             ++ "\n"
+
+lispSourceFoldL :: String
+lispSourceFoldL 
+  = "(define (foldl f x xs)"               ++ "\n" ++
+      "(if (null? xs)"                     ++ "\n" ++
+         "then x"                          ++ "\n" ++
+         "else ("                          ++ "\n" ++
+           "foldl f (f x (car xs)) (cdr xs)" ++ "\n" ++
+        ")"                                ++ "\n" ++
+      ")"                                  ++ "\n" ++
+    ")"                                    ++ "\n"
+
+lispSourceId :: String
+lispSourceId = "(define (id x) x)"
+
+lispSourceAdd :: String
+lispSourceAdd = "(define (add x y) (+ x y))"
+
+lispSourceSum :: String
+lispSourceSum = "(define (sum xs) (foldl add 0 xs))"
+
+prelude = 
+  [ lispSourceMap
+  , lispSourceFoldL
+  , lispSourceId
+  , lispSourceAdd
+  , lispSourceSum
+  ]
 
 lispSourceMapUse = lispSourceMap    ++ "\n" ++
   " (define (double x) (+ x x)) "   ++ "\n" ++
