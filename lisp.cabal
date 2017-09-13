@@ -19,3 +19,7 @@ executable lisp
   default-language:    Haskell2010
   build-depends:       base >= 4.7 && < 5
                      , parsec >= 3.1.11
+                     , ansi-terminal >= 0.6.3
+  other-modules:       Eval
+                     , Parse
+                     , Types

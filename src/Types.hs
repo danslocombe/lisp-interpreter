@@ -105,4 +105,6 @@ data ReplEnv a = ReplEnv Env a deriving (Show, Functor)
 type Ret a = Either LispError a
 
 newtype LispError = LispError String 
-  deriving Show
+
+instance Show LispError where
+  show (LispError e) = e

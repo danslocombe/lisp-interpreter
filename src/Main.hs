@@ -6,10 +6,11 @@ import Types
 import Parse
 import Eval
 
+import Control.Monad (forever, foldM)
+import Data.Either (isRight)
+import System.Console.ANSI
 import Text.Parsec
 import Text.Parsec.Char
-import Data.Either (isRight)
-import Control.Monad (forever, foldM)
 
 emptyEnv :: Env
 emptyEnv = Env []
@@ -29,9 +30,16 @@ lispRepl env s =
                   { x <- eval env lisp
                   ; return $ ReplEnv env (Just x) }
 
+prompt :: String
+prompt = ">>> "
+
 -- Run repl forever
 repl :: Env -> String -> IO a
 repl env s = do 
+  putStr prompt
+  -- This will break on tiny consoles
+  setCursorColumn (length prompt)
+
   if allWhitespace s
   -- If whitespace entered, ignore it and read another line
   then do
@@ -39,12 +47,25 @@ repl env s = do
     repl env s'
   -- Otherwise try and parse it
   else do
+    setCursorColumn 0
+    clearFromCursorToLineEnd
     env' <- case lispRepl env s of
-      Left err -> putStrLn (show err) >> return env
+      Left err -> do
+        setSGR [SetColor Foreground Vivid Red]
+        putStrLn $ "Error: " ++ show err
+        setSGR [Reset]
+        return env
       -- Parsed a definition
-      Right (ReplEnv e Nothing) -> putStrLn "Ok" >> return e
+      Right (ReplEnv e Nothing) -> do
+        putStrLn "Ok"
+        return e
       -- Parsed an expression
-      Right (ReplEnv e2 (Just x)) -> putStrLn (show x) >> return e2
+      Right (ReplEnv e2 (Just x)) -> do
+        putStrLn (show x)
+        return e2
+
+    putStr prompt
+    setCursorColumn (length prompt)
     s' <- getLine
     repl env' s'
 
